@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#18091f">
+<title>Euphoria 2026 | Free Photo Booth</title>
+<style>
+:root{color-scheme:dark;--gold:#ffd36b;--pink:#ff63ce}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at top,#492052,#170b20 65%,#0d0712);color:#fff;font-family:system-ui,-apple-system,Segoe UI,sans-serif}
+main{width:min(760px,100%);margin:auto;padding:22px 16px 46px}
+header{text-align:center;padding:12px 8px 22px}
+.kicker{font-size:.73rem;letter-spacing:.19em;color:#ffd36b;font-weight:800}
+h1{font-size:clamp(2.7rem,12vw,5rem);line-height:.9;margin:12px 0;background:linear-gradient(90deg,#bd8aff,#fff,#ff9a35);color:transparent;background-clip:text;font-weight:1000;font-style:italic}
+header p{margin:12px 0;color:#f4d9ff}
+.pill{display:inline-block;border:1px solid #ffca65;border-radius:99px;padding:7px 13px;color:#ffe1a0;font-size:.78rem}
+.panel{border:1px solid #ffffff2b;background:#ffffff0d;border-radius:22px;padding:18px;box-shadow:0 18px 55px #0005}
+h2{margin:0 0 8px}.muted{color:#d9c5df;font-size:.9rem;line-height:1.5}
+.drop{display:flex;min-height:145px;border:2px dashed #bd80d9;border-radius:16px;align-items:center;justify-content:center;text-align:center;padding:16px;margin:16px 0;background:#ffffff08;cursor:pointer}
+.drop strong{display:block;margin:7px 0;font-size:1.1rem}input[type=file]{display:none}
+#sourcePreview{display:none;max-width:100%;max-height:260px;object-fit:contain;border-radius:12px;margin:12px auto}
+.controls{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:14px 0}
+.controls label{font-size:.85rem;color:#f3e4f7}.controls input{width:100%;accent-color:#ff77d5}
+button,.download{border:0;border-radius:99px;padding:14px 18px;font-weight:850;cursor:pointer;text-decoration:none;text-align:center}
+button{width:100%;color:#26102d;background:linear-gradient(90deg,#ffd36b,#ff9848,#ff65c8);font-size:1rem}
+button:disabled{opacity:.5;cursor:wait}
+#status{min-height:24px;text-align:center;color:#ffe09b;margin:12px 0}
+#output{display:none;margin-top:18px;text-align:center}
+canvas{width:100%;height:auto;border-radius:15px;box-shadow:0 12px 40px #0008;background:#210d2d}
+.download{display:inline-block;background:#fff;color:#27102f;margin-top:14px}
+.note{font-size:.76rem;color:#cdbbd4;line-height:1.5;text-align:center;margin:18px 4px 0}
+.consent{display:flex;gap:9px;align-items:flex-start;font-size:.82rem;color:#e6d5eb;line-height:1.4;margin:14px 0}
+@media(max-width:520px){.controls{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<main>
+<header>
+ <div class="kicker">ICAI VIJAYAWADA BRANCH • SICASA</div>
+ <h1>EUPHORIA<br>2026</h1>
+ <p>DANCE • MUSIC • MADNESS</p>
+ <span class="pill">28 NOVEMBER 2026 · 4 PM ONWARDS</span>
+</header>
+<section class="panel">
+ <h2>See yourself at Euphoria! 💜</h2>
+ <p class="muted">Upload a clear photo. We'll remove its background right here in your browser and place you in the Euphoria festival scene.</p>
+ <label class="drop" for="photo"><span><div style="font-size:2.3rem">📸</div><strong>Choose your photo</strong><span class="muted">A front-facing, waist-up or full-length photo works best · JPG / PNG / WEBP · up to 8 MB</span></span></label>
+ <input id="photo" type="file" accept="image/jpeg,image/png,image/webp">
+ <img id="sourcePreview" alt="Selected photo preview">
+ <div class="controls">
+  <label>Photo size <input id="scale" type="range" min="55" max="115" value="88"></label>
+  <label>Horizontal position <input id="position" type="range" min="20" max="80" value="50"></label>
+ </div>
+ <label class="consent"><input id="consent" type="checkbox"><span>I confirm this is my photo or I have permission to use it. I understand the photo is processed locally in this browser.</span></label>
+ <button id="create" disabled>CREATE MY EUPHORIA PHOTO ✨</button>
+ <div id="status" role="status">Ready when you are!</div>
+ <div id="output">
+  <h2>Your Euphoria moment! 🎉</h2>
+  <canvas id="result" width="1080" height="1350"></canvas>
+  <a id="download" class="download" download="Euphoria-2026-my-photo.png">Download my photo</a>
+ </div>
+</section>
+<p class="note">Free browser-based photo booth. No AI generation API, no account, and no photo upload to our server. Background-removal model files are downloaded from jsDelivr the first time you use the booth. Generated image is an AI-free composite promotional preview, not proof of actual attendance.</p>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/selfie_segmentation.js" crossorigin="anonymous"></script>
+<script>
+const $=id=>document.getElementById(id);
+const photo=$('photo'), preview=$('sourcePreview'), create=$('create'), consent=$('consent');
+const status=$('status'), output=$('output'), result=$('result'), ctx=result.getContext('2d');
+const bg=new Image(); bg.src='./assets/euphoria-stage.jpg';
+let selected=null, personImage=null, segmentation=null, maskCanvas=document.createElement('canvas');
+let maskCtx=maskCanvas.getContext('2d'), personCanvas=document.createElement('canvas'), personCtx=personCanvas.getContext('2d');
+let ready=false, lastMask=null;
+
+function setStatus(s){status.textContent=s}
+function loadImage(file){return new Promise((resolve,reject)=>{const url=URL.createObjectURL(file),im=new Image();im.onload=()=>{URL.revokeObjectURL(url);resolve(im)};im.onerror=reject;im.src=url;});}
+photo.addEventListener('change',async()=>{
+ selected=photo.files[0]||null;output.style.display='none';
+ if(!selected)return;
+ if(!['image/jpeg','image/png','image/webp'].includes(selected.type)||selected.size>8*1024*1024){
+  setStatus('Please choose a JPG, PNG or WEBP photo under 8 MB.');selected=null;photo.value='';create.disabled=true;return;
+ }
+ try{personImage=await loadImage(selected);preview.src=URL.createObjectURL(selected);preview.style.display='block';create.disabled=!(consent.checked&&ready);setStatus('Photo selected. Tap create when ready.');}
+ catch(e){setStatus('Could not open that image. Please try another photo.');}
+});
+consent.addEventListener('change',()=>create.disabled=!(selected&&ready&&consent.checked));
+
+async function initSegmenter(){
+ if(typeof SelfieSegmentation==='undefined')throw new Error('Could not load the free background-removal model. Check your internet connection and refresh.');
+ segmentation=new SelfieSegmentation({locateFile:file=>`https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/${file}`});
+ segmentation.setOptions({modelSelection:1});
+ segmentation.onResults(results=>{lastMask=results.segmentationMask;});
+ await segmentation.initialize();ready=true;create.disabled=!(selected&&consent.checked);setStatus('Background-removal model ready. ✨');
+}
+function drawCover(image,x,y,w,h){
+ const s=Math.max(w/image.width,h/image.height),sw=w/s,sh=h/s,sx=(image.width-sw)/2,sy=(image.height-sh)/2;
+ ctx.drawImage(image,sx,sy,sw,sh,x,y,w,h);
+}
+function drawComposite(){
+ ctx.clearRect(0,0,result.width,result.height);
+ drawCover(bg,0,0,result.width,result.height);
+ if(!personImage||!lastMask)return;
+ const iw=personImage.naturalWidth,ih=personImage.naturalHeight;
+ const scale=Number($('scale').value)/100;
+ const targetH=result.height*scale, targetW=targetH*(iw/ih);
+ const centerX=result.width*Number($('position').value)/100;
+ const dx=centerX-targetW/2,dy=result.height-targetH+15;
+ personCanvas.width=iw;personCanvas.height=ih;maskCanvas.width=iw;maskCanvas.height=ih;
+ personCtx.clearRect(0,0,iw,ih);personCtx.drawImage(personImage,0,0,iw,ih);
+ maskCtx.clearRect(0,0,iw,ih);maskCtx.drawImage(lastMask,0,0,iw,ih);
+ personCtx.globalCompositeOperation='destination-in';personCtx.drawImage(maskCanvas,0,0,iw,ih);personCtx.globalCompositeOperation='source-over';
+ ctx.save();ctx.shadowColor='rgba(255,95,220,.42)';ctx.shadowBlur=22;ctx.drawImage(personCanvas,dx,dy,targetW,targetH);ctx.restore();
+ // A small campaign caption sits on the lower edge, integrated as a photo-booth signature.
+ const grad=ctx.createLinearGradient(0,1120,0,1350);grad.addColorStop(0,'rgba(17,4,28,0)');grad.addColorStop(1,'rgba(17,4,28,.78)');
+ ctx.fillStyle=grad;ctx.fillRect(0,1120,1080,230);
+ ctx.textAlign='center';ctx.fillStyle='#ffe0a0';ctx.font='bold 42px system-ui';ctx.fillText('I’LL SEE YOU AT EUPHORIA!',540,1290);
+ ctx.fillStyle='#fff';ctx.font='24px system-ui';ctx.fillText('28 NOVEMBER 2026  •  VIJAYAWADA',540,1327);
+}
+async function generate(){
+ if(!selected||!personImage||!consent.checked)return;
+ create.disabled=true;setStatus('Removing your background on this device…');
+ try{
+  await segmentation.send({image:personImage});
+  if(!lastMask)throw new Error('The model could not detect a person. Try a clearer photo with the person fully visible.');
+  drawComposite();output.style.display='block';
+  $('download').href=result.toDataURL('image/png');
+  setStatus('Your Euphoria photo is ready! Download and share it 💜');
+ }catch(e){setStatus(e.message||'Something went wrong. Try a clearer photo.');}
+ finally{create.disabled=!(selected&&ready&&consent.checked);}
+}
+create.addEventListener('click',generate);
+$('scale').addEventListener('input',()=>{if(lastMask&&output.style.display==='block'){drawComposite();$('download').href=result.toDataURL('image/png');}});
+$('position').addEventListener('input',()=>{if(lastMask&&output.style.display==='block'){drawComposite();$('download').href=result.toDataURL('image/png');}});
+bg.onload=()=>setStatus('Loading free background-removal model…');
+initSegmenter().catch(e=>setStatus(e.message));
+</script>
+</body></html>
